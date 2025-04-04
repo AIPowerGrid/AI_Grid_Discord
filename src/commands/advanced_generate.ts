@@ -217,10 +217,28 @@ const command_data = new SlashCommandBuilder()
                 .setDescription("Whether to apply hires_fix to the generation")
             )
         }
+        if(config.advanced_generate.user_restrictions?.allow_qr_codes) {
+            command_data
+            .addStringOption(
+                new SlashCommandStringOption()
+                .setName("qr_code_url")
+                .setDescription("The url to use for the qr code")
+            )
+        }
+        if(config.advanced_generate.user_restrictions?.allow_clip_skip) {
+            command_data
+            .addIntegerOption(
+                new SlashCommandIntegerOption()
+                .setName("clip_skip")
+                .setDescription("The number of CLIP language processor layers to skip")
+                .setMinValue(1) //1 is off/default
+                .setMaxValue(12)
+            )
+        }
     }
 
 
-    // 21 out of 25 options used
+    // 25 out of 25 options used(!)
 
 function generateButtons(id: string) {
     let i = 0
@@ -277,7 +295,9 @@ export default class extends Command {
         const share_result = ctx.interaction.options.getBoolean("share_result") ?? ctx.client.config.advanced_generate?.default?.share
         const lora_id = ctx.interaction.options.getString("lora")
         const ti_raw = ctx.interaction.options.getString("textual_inversion") ?? ctx.client.config.advanced_generate.default?.tis
-        const hires_fix = ctx.interaction.options.getBoolean("hires_fix") ?? ctx.client.config.advanced_generate.default?.hires_fix ?? false
+        const hires_fix = ctx.interaction.options.getBoolean("hires_fix") ?? ctx.client.config.advanced_generate.default?.hires_fix
+        const qr_code_url = ctx.interaction.options.getString("qr_code_url")
+        const clipskip = ctx.interaction.options.getInteger("clip_skip") ?? style?.clip_skip ?? ctx.client.config.advanced_generate?.default?.clip_skip
         let img = ctx.interaction.options.getAttachment("source_image")
 
         const user_token = await ctx.client.getUserToken(ctx.interaction.user.id, ctx.database)
@@ -292,6 +312,10 @@ export default class extends Command {
             if(lora.type !== "LORA" && lora.type !== "LoCon") return ctx.error({error: "The given ID is not a LORA, LoCon or LyCORIS"})
             if(lora.modelVersions[0]?.files[0]?.sizeKB && lora.modelVersions[0]?.files[0]?.sizeKB > 225280 && !ctx.client.horde_curated_loras?.includes(lora.id)) return ctx.error({error: "The given LORA, LoCon or LyCORIS is larger than 220mb"})
         }
+        const lora_obj = lora_id ? [{
+                "name": lora_id,
+                "inject_trigger": "all"
+            }] : style?.loras;
 
         if(party?.channel_id) return ctx.error({error: `You can only use ${await ctx.client.getSlashCommandTag("generate")} in parties`, codeblock: false})
         if(ctx.client.config.advanced_generate?.require_login && !user_token) return ctx.error({error: `You are required to ${await ctx.client.getSlashCommandTag("login")} to use ${await ctx.client.getSlashCommandTag("advanced_generate")}`, codeblock: false})
@@ -375,6 +399,7 @@ export default class extends Command {
             params: {
                 sampler_name: sampler,
                 cfg_scale: cfg,
+                clip_skip: clipskip,
                 seed: seed ?? undefined,
                 height,
                 width,
@@ -385,9 +410,11 @@ export default class extends Command {
                 n: amount,
                 denoising_strength: denoise,
                 karras,
-                loras: lora_id ? [{name: lora_id}] : undefined,
+                loras: lora_obj,
                 tis,
-                hires_fix
+                hires_fix,
+                workflow: qr_code_url ? "qr_code" : undefined,
+                extra_texts: qr_code_url ? [{text: qr_code_url, reference: "qr_code"}] : undefined
             },
             replacement_filter: ctx.client.config.advanced_generate.replacement_filter,
             nsfw: ctx.client.config.advanced_generate?.user_restrictions?.allow_nsfw,
